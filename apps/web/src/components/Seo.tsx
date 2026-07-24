@@ -6,6 +6,8 @@ interface SeoProps {
   description: string;
   /** Emitted only on the home route; one LocalBusiness node per site. */
   includeBusinessSchema?: boolean;
+  /** Admin pages only: excludes the page from indexing (spec 003 AC11). */
+  noindex?: boolean;
 }
 
 function setMeta(name: string, content: string) {
@@ -42,11 +44,19 @@ export function businessSchema() {
   };
 }
 
-export function Seo({ title, description, includeBusinessSchema = false }: SeoProps) {
+export function Seo({ title, description, includeBusinessSchema = false, noindex = false }: SeoProps) {
   useEffect(() => {
     document.title = `${title} — ${clinic.name}`;
     setMeta('description', description);
-  }, [title, description]);
+    // A client-side SPA navigation reuses this same <head> — an admin page's
+    // noindex tag must not survive onto the next public page rendered in the
+    // same session, or it stays not-indexable indefinitely.
+    if (noindex) {
+      setMeta('robots', 'noindex,nofollow');
+    } else {
+      setMeta('robots', 'index,follow');
+    }
+  }, [title, description, noindex]);
 
   useEffect(() => {
     if (!includeBusinessSchema) return;
