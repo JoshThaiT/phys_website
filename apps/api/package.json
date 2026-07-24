@@ -1,0 +1,12 @@
+{
+  "name": "api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "db": "workspace:*",
+    "shared": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": { "@vercel/node": "^5.0.0" }
+}

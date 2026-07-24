@@ -1,0 +1,20 @@
+name: agent guards
+
+# The agent configuration is code. It regresses like code.
+on:
+  pull_request:
+    paths: ['.claude/**', 'scripts/guards/**', 'evals/**', 'CLAUDE.md']
+  push:
+    branches: [main]
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get install -y jq
+      - name: Guard regression suite
+        run: ./evals/guards.test.sh
+      - name: Agent frontmatter is valid
+        run: ./evals/agents.test.sh

@@ -1,0 +1,10 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 11 blocks all dependency postinstall/build scripts by default
+# (strictDepBuilds). esbuild (a transitive dep of vite/vitest) needs its
+# install script to run; everything else stays blocked by default, which is
+# the safer posture to keep.
+allowBuilds:
+  esbuild: true

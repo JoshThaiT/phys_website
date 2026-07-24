@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :focus-visible {
+    @apply outline-none ring-2 ring-clinic ring-offset-2 ring-offset-paper;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-feature-settings: 'ss01', 'cv05';
+  }
+
+  h1, h2, h3 {
+    @apply font-display font-bold;
+  }
+}
+
+@layer components {
+  /* Skip link: visible only once focused. */
+  .skip-link {
+    @apply absolute left-gutter top-2 -translate-y-24 rounded-card bg-ink px-4 py-2
+           text-ink-inverse transition-transform focus:translate-y-0;
+  }
+}
