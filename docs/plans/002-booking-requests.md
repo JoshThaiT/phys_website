@@ -25,14 +25,24 @@ shared memory. A hashed source key plus a time window gives both.
 
 ## Files
 
+**Reconciled 2026-07-25 (spec 005):** this table is corrected below to match
+what actually shipped. Two files this plan named were never created — the
+rate limit ended up inline in the handler rather than in its own module, and
+`notify.ts` was deferred until spec 006 built the production wiring that
+needed it — while two files this plan didn't foresee (`privacy.ts` for the
+IP-hashing helpers, and folding the reference/notification-payload helpers
+into `booking.ts` rather than a separate module) were added along the way.
+None of this changed the behaviour the acceptance criteria describe; it is a
+paper correction so the scope guard has an accurate baseline to diff against.
+
 | Path | Action | What changes |
 |------|--------|--------------|
-| packages/shared/src/booking.ts | create | Zod request/response schemas, consent, limits |
+| packages/shared/src/booking.ts | create | Zod request/response schemas, consent, limits, **and** (not originally planned here) `makeReference` and `notificationPayload` — the reference generator and the whitelisted notification-payload builder both live in this file, not a separate module |
 | packages/shared/src/index.ts | modify | export booking schemas |
 | packages/db/src/schema.ts | modify | `booking_requests` table + indexes |
-| apps/api/routes/booking-requests.ts | create | POST handler |
-| apps/api/lib/rateLimit.ts | create | windowed limit keyed on a hashed source |
-| apps/api/lib/notify.ts | create | whitelisted notification payload |
+| apps/api/routes/booking-requests.ts | create | POST handler. The rate-limit check is inline in this file (the windowed `countSince` comparison against `RATE_LIMIT.max`) — **`apps/api/lib/rateLimit.ts` was never created**; there was no separable logic left once the store call and the comparison landed in the handler itself |
+| apps/api/lib/privacy.ts | create | *(not in the original table)* `clientIp`, `hashSource`, `safeFieldNames` — the salted source-hashing and field-name-only logging helpers referenced in this plan's "Files" narrative live here |
+| apps/api/lib/notify.ts | create | *(created by spec 006, not 002)* whitelisted notification payload sender, `createBookingNotifier(transport, opts)` over the `MailTransport` seam. 002 shipped `createHandler` depending on an injected `notify: Deps['notify']` function but never created the production implementation this file provides — see docs/specs/006-booking-request-wiring.md |
 | apps/web/src/routes/Book.tsx | create | the form |
 | apps/web/src/components/Field.tsx | create | labelled input with error wiring |
 | apps/web/src/components/CollectionNotice.tsx | create | APP 5 notice |

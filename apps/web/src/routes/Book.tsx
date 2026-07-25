@@ -26,6 +26,11 @@ export function Book() {
   const [params] = useSearchParams();
   const [result, setResult] = useState<BookingResponse | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Set only for a 503 UNAVAILABLE response — rendered as its own branch,
+   *  distinct from the generic error alert, with the clinic phone as a
+   *  `tel:` link. Typed values are retained either way: RHF does not reset
+   *  the form on a failed submit. */
+  const [unavailable, setUnavailable] = useState(false);
   /** Stable for the life of the form, so a retry cannot create a duplicate. */
   const [idempotencyKey] = useState(() => globalThis.crypto.randomUUID());
 
@@ -47,6 +52,7 @@ export function Book() {
 
   async function onSubmit(values: BookingRequest) {
     setSubmitError(null);
+    setUnavailable(false);
     try {
       const response = await apiFetch('/booking-requests', bookingResponseSchema, {
         method: 'POST',
@@ -55,6 +61,11 @@ export function Book() {
       });
       setResult(response);
     } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'UNAVAILABLE') {
+        setUnavailable(true);
+        setSubmitError(err.message);
+        return;
+      }
       setSubmitError(
         err instanceof ApiRequestError
           ? err.message
@@ -107,7 +118,22 @@ export function Book() {
         </p>
 
         <form onSubmit={(e) => void handleSubmit(onSubmit)(e)} noValidate className="mt-10 space-y-8">
-          {submitError && (
+          {submitError && unavailable && (
+            <div role="alert" className="rounded-card border border-clinic bg-clinic-wash p-4 text-clinic-deep">
+              <p>{submitError}</p>
+              <p className="mt-2">
+                What you have entered below has been kept — please phone the clinic on{' '}
+                <a
+                  className="font-medium underline underline-offset-4"
+                  href={`tel:${clinic.phone.replace(/\s|\(|\)/g, '')}`}
+                >
+                  {clinic.phone}
+                </a>{' '}
+                or try sending the request again.
+              </p>
+            </div>
+          )}
+          {submitError && !unavailable && (
             <div role="alert" className="rounded-card border border-alert bg-paper-raised p-4 text-alert">
               {submitError}
             </div>
