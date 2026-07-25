@@ -145,4 +145,36 @@ describe('POST /api/booking-requests', () => {
     );
     expect(res.statusCode).toBe(405);
   });
+
+  it('accepts an injected clinicPhone seam without changing existing behaviour', async () => {
+    const { store, rows } = makeStore();
+    const res = mockRes();
+    await createHandler({
+      store,
+      notify: async () => {},
+      now: () => NOW,
+      clinicPhone: () => '(02) 5550 1234',
+    })(req(validBody), res as unknown as Res);
+    expect(res.statusCode).toBe(202);
+    expect((res.body as { reference: string }).reference).toMatch(/^BR-[A-Z0-9]{6}$/);
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe('default export (production wiring)', () => {
+  it('builds the handler lazily — importing the route does not require POSTGRES_URL', async () => {
+    const originalUrl = process.env['POSTGRES_URL'];
+    delete process.env['POSTGRES_URL'];
+    try {
+      // A fresh module graph so any accidental module-scope getDb() call
+      // (which throws without POSTGRES_URL) surfaces here, at import time,
+      // rather than being masked by an already-cached module.
+      vi.resetModules();
+      await expect(import('./booking-requests.js')).resolves.toBeDefined();
+    } finally {
+      if (originalUrl === undefined) delete process.env['POSTGRES_URL'];
+      else process.env['POSTGRES_URL'] = originalUrl;
+      vi.resetModules();
+    }
+  });
 });

@@ -26,3 +26,19 @@ It runs on your machine, in your own terminal, using your own accounts. There
 is no way for an AI assistant to reach into your computer or sign up for
 services on your behalf — those two steps above are the only ones that
 actually require you, and everything else is now one command.
+
+## Environment variables
+
+Set these in your own `.env.local` (never committed — see `.env.example` for
+the full template). Two are new as of spec 006:
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CLINIC_PHONE` | recommended | Clinic phone number shown to a patient in the booking form's 503 "we couldn't save your request" message (spec 005). Non-secret. |
+| `BOOKING_NOTIFY_TO` | recommended | Reception mailbox that receives the new-booking-request notification email (spec 006, `apps/api/lib/notify.ts`). Non-secret. |
+
+Neither is `VITE_`-prefixed, so neither is shipped to the browser — both are
+read only by `apps/api` server code. See
+`docs/decisions/0001-clinic-phone-source.md` for why `CLINIC_PHONE` is an env
+var rather than a value shared with the web app's content, and the drift risk
+that follows from having two sources for the same number.

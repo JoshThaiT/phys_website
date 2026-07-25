@@ -5,9 +5,12 @@ import {
   makeReference,
   notificationPayload,
 } from 'shared';
-import { HttpError, parse, route, type Req, type Res } from '../handler.js';
+import { HttpError, parse, route, type Handler, type Req, type Res } from '../handler.js';
 import { clientIp, hashSource, safeFieldNames } from '../lib/privacy.js';
 import { apiError, ERROR_CODES } from 'shared';
+import { createBookingNotifier } from '../lib/notify.js';
+import { createFetchTransport } from '../lib/mailer.js';
+import { createBookingStore, getDb } from 'db';
 
 /**
  * Storage seam. The handler depends on this interface rather than on Drizzle
@@ -38,6 +41,12 @@ export interface Deps {
   notify: (payload: Record<string, unknown>) => Promise<void>;
   now?: () => Date;
   random?: () => number;
+  /**
+   * Clinic phone number seam. Introduced by spec 006 for spec 005's 503
+   * message to consume; not read inside `createHandler` here (see ADR
+   * 0001 for the decision this seam wires — env, not `packages/shared`).
+   */
+  clinicPhone?: () => string;
 }
 
 const ACCEPTED_MESSAGE =
@@ -115,4 +124,23 @@ export function logValidationFailure(requestId: string, fields: Record<string, s
   console.error(
     JSON.stringify({ level: 'warn', route: 'booking-requests', requestId, invalidFields: safeFieldNames(fields) }),
   );
+}
+
+/**
+ * Real wiring, lazily constructed on first invocation — see the matching
+ * comment in admin-auth.ts / purge.ts for why this is not module-scope
+ * work. `getDb()` must not be called at import time, or the route becomes
+ * un-importable for unit tests without `POSTGRES_URL`.
+ */
+let cached: Handler | undefined;
+
+export default function handler(req: Req, res: Res): Promise<void> | void {
+  cached ??= createHandler({
+    store: createBookingStore(getDb()),
+    notify: createBookingNotifier(createFetchTransport(), {
+      to: process.env['BOOKING_NOTIFY_TO'] ?? '',
+    }),
+    clinicPhone: () => process.env['CLINIC_PHONE'] ?? '',
+  });
+  return cached(req, res);
 }
