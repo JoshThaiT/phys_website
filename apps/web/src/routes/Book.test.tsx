@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { RETENTION_DAYS } from 'shared';
@@ -97,6 +97,44 @@ describe('Book', () => {
     await user.click(screen.getByRole('button', { name: /send request/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/phone the clinic/i);
     expect(screen.getByLabelText(/your name/i)).toHaveValue('Jo Nguyen');
+  });
+
+  it('renders a distinct branch with the clinic phone on a 503 UNAVAILABLE, keeping entered values', async () => {
+    const user = userEvent.setup();
+    mockFetch(503, {
+      error: {
+        code: 'UNAVAILABLE',
+        message: "We couldn't save your request just now. Please phone the clinic on (02) 9557 0000.",
+        requestId: 'req-1',
+      },
+    });
+    renderBook();
+    await fillValid(user);
+    await user.click(screen.getByRole('checkbox', { name: /i consent/i }));
+    await user.click(screen.getByRole('button', { name: /send request/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/phone the clinic/i);
+    const phoneLink = within(alert).getByRole('link', { name: /\(02\) 9557 0000/ });
+    expect(phoneLink).toHaveAttribute('href', expect.stringContaining('tel:'));
+    expect(screen.getByLabelText(/your name/i)).toHaveValue('Jo Nguyen');
+    expect(screen.getByLabelText(/^phone$/i)).toHaveValue('0412345678');
+  });
+
+  it('renders the generic error branch (not the UNAVAILABLE branch) for a non-503 API error', async () => {
+    const user = userEvent.setup();
+    mockFetch(400, { error: { code: 'VALIDATION_FAILED', message: 'Check the highlighted fields.' } });
+    const { container } = renderBook();
+    await fillValid(user);
+    await user.click(screen.getByRole('checkbox', { name: /i consent/i }));
+    await user.click(screen.getByRole('button', { name: /send request/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/check the highlighted fields/i);
+    // The page always shows one static tel: link ("if you need to be seen
+    // today..."); the UNAVAILABLE branch's own tel: link inside the alert
+    // must NOT additionally appear for a non-503 error.
+    expect(container.querySelectorAll('a[href^="tel:"]')).toHaveLength(1);
   });
 
   it('preselects the service from the query string', () => {

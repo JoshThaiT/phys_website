@@ -44,7 +44,7 @@ export const notFound = (message = 'Not found.') =>
 export const conflict = (message: string) =>
   new HttpError(409, apiError(ERROR_CODES.CONFLICT, message));
 
-function requestId(): string {
+export function requestId(): string {
   return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }
 

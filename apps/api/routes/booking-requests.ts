@@ -5,7 +5,7 @@ import {
   makeReference,
   notificationPayload,
 } from 'shared';
-import { HttpError, parse, route, type Handler, type Req, type Res } from '../handler.js';
+import { HttpError, parse, requestId, route, type Handler, type Req, type Res } from '../handler.js';
 import { clientIp, hashSource, safeFieldNames } from '../lib/privacy.js';
 import { apiError, ERROR_CODES } from 'shared';
 import { createBookingNotifier } from '../lib/notify.js';
@@ -53,7 +53,13 @@ const ACCEPTED_MESSAGE =
   'Thanks — reception will contact you to confirm a time, usually within one business day. ' +
   'If your problem is urgent, please phone the clinic.';
 
-export function createHandler({ store, notify, now = () => new Date(), random = Math.random }: Deps) {
+export function createHandler({
+  store,
+  notify,
+  now = () => new Date(),
+  random = Math.random,
+  clinicPhone,
+}: Deps) {
   return route(['POST'], async (req: Req, res: Res) => {
     const body = parse(bookingRequestSchema, req.body);
 
@@ -72,44 +78,67 @@ export function createHandler({ store, notify, now = () => new Date(), random = 
       ? (idempotencyKeyHeader[0] ?? null)
       : (idempotencyKeyHeader ?? null);
 
-    if (idempotencyKey) {
-      const existing = await store.findByIdempotencyKey(idempotencyKey);
-      if (existing) {
-        res.status(202).json({ reference: existing.reference, message: ACCEPTED_MESSAGE });
-        return;
-      }
-    }
+    let reference: string;
 
-    const windowStart = new Date(at.getTime() - RATE_LIMIT.windowMinutes * 60_000);
-    if ((await store.countSince(sourceHash, windowStart)) >= RATE_LIMIT.max) {
+    try {
+      if (idempotencyKey) {
+        const existing = await store.findByIdempotencyKey(idempotencyKey);
+        if (existing) {
+          res.status(202).json({ reference: existing.reference, message: ACCEPTED_MESSAGE });
+          return;
+        }
+      }
+
+      const windowStart = new Date(at.getTime() - RATE_LIMIT.windowMinutes * 60_000);
+      if ((await store.countSince(sourceHash, windowStart)) >= RATE_LIMIT.max) {
+        throw new HttpError(
+          429,
+          apiError(ERROR_CODES.RATE_LIMITED, 'Too many requests. Please phone the clinic instead.'),
+        );
+      }
+
+      reference = makeReference(random);
+      const purgeAfter = new Date(at.getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
+
+      await store.insert({
+        reference,
+        serviceSlug: body.serviceSlug,
+        practitioner: body.practitioner || null,
+        fullName: body.fullName,
+        phone: body.phone || null,
+        email: body.email || null,
+        preferred: body.preferred,
+        reason: body.reason || null,
+        consentAt: at,
+        sourceHash,
+        idempotencyKey,
+        purgeAfter,
+      });
+    } catch (err) {
+      if (err instanceof HttpError) throw err; // 429 and friends pass through untouched
+      const phone = clinicPhone?.() ?? '';
+      const id = requestId();
+      logStoreFailure(id);
       throw new HttpError(
-        429,
-        apiError(ERROR_CODES.CONFLICT, 'Too many requests. Please phone the clinic instead.'),
+        503,
+        apiError(
+          ERROR_CODES.UNAVAILABLE,
+          `We couldn't save your request just now. Please phone the clinic on ${phone}.`,
+          { requestId: id },
+        ),
       );
     }
 
-    const reference = makeReference(random);
-    const purgeAfter = new Date(at.getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
-
-    await store.insert({
-      reference,
-      serviceSlug: body.serviceSlug,
-      practitioner: body.practitioner || null,
-      fullName: body.fullName,
-      phone: body.phone || null,
-      email: body.email || null,
-      preferred: body.preferred,
-      reason: body.reason || null,
-      consentAt: at,
-      sourceHash,
-      idempotencyKey,
-      purgeAfter,
-    });
-
-    // Whitelisted. The reason column is health information and never leaves here.
-    await notify(
-      notificationPayload({ reference, fullName: body.fullName, serviceSlug: body.serviceSlug, createdAt: at.toISOString() }),
-    );
+    try {
+      // Whitelisted. The reason column is health information and never leaves here.
+      await notify(
+        notificationPayload({ reference, fullName: body.fullName, serviceSlug: body.serviceSlug, createdAt: at.toISOString() }),
+      );
+    } catch {
+      // The record is already stored safely; a notification failure must
+      // never surface to the patient as an error.
+      logNotifyFailure(requestId());
+    }
 
     res.status(202).json({ reference, message: ACCEPTED_MESSAGE });
   });
@@ -124,6 +153,23 @@ export function logValidationFailure(requestId: string, fields: Record<string, s
   console.error(
     JSON.stringify({ level: 'warn', route: 'booking-requests', requestId, invalidFields: safeFieldNames(fields) }),
   );
+}
+
+/**
+ * Logged when a store read/write throws (503 `UNAVAILABLE` path). Field-safe
+ * like `logValidationFailure` above: requestId and route context only, never
+ * the request body or the thrown error's own message — an underlying driver
+ * error could in principle echo query parameters, so it is never serialised
+ * here.
+ */
+export function logStoreFailure(id: string) {
+  console.error(JSON.stringify({ level: 'error', route: 'booking-requests', requestId: id, stage: 'store' }));
+}
+
+/** Logged when `notify` throws. The failure is swallowed — the booking is
+ *  already safely stored — but still recorded field-safe for observability. */
+export function logNotifyFailure(id: string) {
+  console.error(JSON.stringify({ level: 'error', route: 'booking-requests', requestId: id, stage: 'notify' }));
 }
 
 /**
