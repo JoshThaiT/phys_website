@@ -1,4 +1,4 @@
-import { index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * Schema conventions:
@@ -59,6 +59,16 @@ export const bookingRequests = pgTable(
     purgeAfter: timestamp('purge_after', { withTimezone: true }).notNull(),
     contactedAt: timestamp('contacted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Admin-view attribution columns (003). Added expand-only: nullable or
+     * NOT NULL DEFAULT so 002's insert, which names none of them, keeps
+     * working unmodified.
+     */
+    internalNote: text('internal_note'),
+    lastActionedBy: uuid('last_actioned_by').references(() => users.id),
+    statusUpdatedAt: timestamp('status_updated_at', { withTimezone: true }),
+    /** Optimistic-concurrency token: updates are `WHERE version = expected`. */
+    version: integer('version').notNull().default(0),
   },
   (t) => [
     index('booking_requests_status_created').on(t.status, t.createdAt),
@@ -69,3 +79,73 @@ export const bookingRequests = pgTable(
 
 export type BookingRequestRow = typeof bookingRequests.$inferSelect;
 export type NewBookingRequestRow = typeof bookingRequests.$inferInsert;
+
+/**
+ * Admin authentication (003) — passwordless magic-link + server-side session.
+ * Reception identity is the existing `users` table; membership in it IS the
+ * allowlist. Tokens and session identifiers are stored ONLY as SHA-256
+ * hashes, mirroring `bookingRequests.sourceHash`, so a DB dump cannot be
+ * replayed into a session.
+ */
+export const authTokens = pgTable('auth_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  /** Set on first use. A non-null value means the link is already spent. */
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AuthTokenRow = typeof authTokens.$inferSelect;
+export type NewAuthTokenRow = typeof authTokens.$inferInsert;
+
+export const sessions = pgTable('sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+  tokenHash: text('token_hash').notNull().unique(),
+  /** Idle-timeout basis; touched on every authenticated request. */
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type SessionRow = typeof sessions.$inferSelect;
+export type NewSessionRow = typeof sessions.$inferInsert;
+
+/**
+ * Attribution trail for admin actions. NEVER holds `reason` — a deletion
+ * copies the human-quotable `reference` so the event remains legible after
+ * the booking row itself is gone, but the health information is not
+ * duplicated anywhere.
+ *
+ * Generalised by 004 to also hold one system-written summary row per purge
+ * run (`action = 'purge_run'`): `actorId` and `reference` are nullable
+ * because a run names no user and no single request, and `deletedUnactioned`
+ * / `deletedActioned` are set only on those rows. `requestId` stays null on a
+ * `purge_run` row, so it never appears in a request's own history view (003).
+ */
+export const adminAudit = pgTable('admin_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** Null means the actor was the system (a purge run), not a person. */
+  actorId: uuid('actor_id').references(() => users.id),
+  action: text('action', { enum: ['status_change', 'delete', 'purge_run'] }).notNull(),
+  /** Null only on a `purge_run` row, which names no single request. */
+  reference: text('reference'),
+  /** Null after the booking row is deleted, and always null on a `purge_run` row. */
+  requestId: uuid('request_id'),
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  /** Set only on a `purge_run` row. */
+  deletedUnactioned: integer('deleted_unactioned'),
+  deletedActioned: integer('deleted_actioned'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AdminAuditRow = typeof adminAudit.$inferSelect;
+export type NewAdminAuditRow = typeof adminAudit.$inferInsert;
