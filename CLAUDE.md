@@ -60,6 +60,21 @@ relitigate them in a PR.
   code.** Vercel does not deploy atomically with the database. Expand first,
   contract in a later PR: add nullable column -> backfill -> start writing ->
   stop reading old column -> drop it. Four PRs, not one.
+- **`apps/api` has no direct dependency on `drizzle-orm`** — only `packages/db`
+  does (pnpm's strict workspace isolation, not hoisted transitively). Query
+  builders (`eq`, `and`, transactions, …) must live in `packages/db/src/*`
+  behind a plain-object store factory (e.g. `createXStore(db)`); route files
+  consume the store structurally and stay drizzle-free.
+
+### API handlers
+
+- Each route exports a `createHandler({ store, now })` factory plus a default
+  export wired to the real `getDb()`-backed store — never construct the DB
+  client at module scope (cold-start + testability). `now` is an injectable
+  clock, not `Date.now()` inline, so time-dependent logic is deterministic in
+  tests.
+- Tests inject a fake store and fake clock; there is no live-DB test harness.
+  Match the pattern in `apps/api/routes/booking-requests.test.ts`.
 
 ### Vercel
 
