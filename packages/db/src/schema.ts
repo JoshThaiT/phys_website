@@ -123,18 +123,27 @@ export type NewSessionRow = typeof sessions.$inferInsert;
  * copies the human-quotable `reference` so the event remains legible after
  * the booking row itself is gone, but the health information is not
  * duplicated anywhere.
+ *
+ * Generalised by 004 to also hold one system-written summary row per purge
+ * run (`action = 'purge_run'`): `actorId` and `reference` are nullable
+ * because a run names no user and no single request, and `deletedUnactioned`
+ * / `deletedActioned` are set only on those rows. `requestId` stays null on a
+ * `purge_run` row, so it never appears in a request's own history view (003).
  */
 export const adminAudit = pgTable('admin_audit', {
   id: uuid('id').primaryKey().defaultRandom(),
-  actorId: uuid('actor_id')
-    .notNull()
-    .references(() => users.id),
-  action: text('action', { enum: ['status_change', 'delete'] }).notNull(),
-  reference: text('reference').notNull(),
-  /** Null after the booking row is deleted; non-null for a status change. */
+  /** Null means the actor was the system (a purge run), not a person. */
+  actorId: uuid('actor_id').references(() => users.id),
+  action: text('action', { enum: ['status_change', 'delete', 'purge_run'] }).notNull(),
+  /** Null only on a `purge_run` row, which names no single request. */
+  reference: text('reference'),
+  /** Null after the booking row is deleted, and always null on a `purge_run` row. */
   requestId: uuid('request_id'),
   fromStatus: text('from_status'),
   toStatus: text('to_status'),
+  /** Set only on a `purge_run` row. */
+  deletedUnactioned: integer('deleted_unactioned'),
+  deletedActioned: integer('deleted_actioned'),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 });
 
