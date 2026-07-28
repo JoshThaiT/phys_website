@@ -6,7 +6,6 @@
   "framework": "vite",
   "functions": {
     "apps/api/routes/*.ts": {
-      "runtime": "@vercel/node@5",
       "maxDuration": 10
     }
   },
