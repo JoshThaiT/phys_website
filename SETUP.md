@@ -36,9 +36,21 @@ the full template). Two are new as of spec 006:
 |---|---|---|
 | `CLINIC_PHONE` | recommended | Clinic phone number shown to a patient in the booking form's 503 "we couldn't save your request" message (spec 005). Non-secret. |
 | `BOOKING_NOTIFY_TO` | recommended | Reception mailbox that receives the new-booking-request notification email (spec 006, `apps/api/lib/notify.ts`). Non-secret. |
+| `MAIL_API_URL` | required for email | Mail provider send endpoint. For Resend (ADR 0002): `https://api.resend.com/emails`. Non-secret. |
+| `MAIL_API_KEY` | required for email | Resend API key (`re_…`). **Secret** — set in Vercel's encrypted env store, never committed. |
+| `MAIL_FROM` | required for email | Verified sender address, e.g. `"Clinic <no-reply@your-domain>"`. The domain must be verified in Resend or sends are rejected. Non-secret. |
 
-Neither is `VITE_`-prefixed, so neither is shipped to the browser — both are
-read only by `apps/api` server code. See
+None is `VITE_`-prefixed, so none is shipped to the browser — all are read only
+by `apps/api` server code. See
 `docs/decisions/0001-clinic-phone-source.md` for why `CLINIC_PHONE` is an env
 var rather than a value shared with the web app's content, and the drift risk
 that follows from having two sources for the same number.
+`docs/decisions/0002-mail-provider-resend.md` records why Resend was chosen and
+how the provider-agnostic mail seam maps onto it (no code change — the three
+`MAIL_*` values above configure it entirely).
+
+Email delivery is disabled until all three `MAIL_*` vars are set: the transport
+in `apps/api/lib/mailer.ts` throws `Mail transport is not configured` otherwise.
+That blocks admin magic-link sign-in (spec 003) outright; a booking notification
+failure (spec 006) is swallowed so a patient's request still returns 202, but
+reception receives no email.
